@@ -21,7 +21,7 @@ import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { get } from "node:https";
-import { networkInterfaces, hostname as readHostname } from "node:os";
+import { homedir, networkInterfaces, hostname as readHostname } from "node:os";
 import { join } from "node:path";
 import { projectRoot } from "./dev-services";
 import { loadDevelopmentEnvironment } from "./development-environment";
@@ -174,6 +174,25 @@ async function probe(url: string, deadlineMs: number): Promise<boolean> {
   return false;
 }
 
+/**
+ * Writes the private network route into the development profile of the host. The desktop app reads
+ * it at start, and a change closes the connected peers, so it is written before the app opens.
+ */
+function ensurePrivateRoute(): void {
+  const profileDirectory = join(appDataDirectory(), "OpenBot Dev");
+  mkdirSync(profileDirectory, { recursive: true });
+  writeFileSync(
+    join(profileDirectory, "openbot-remote-network-route-v1.json"),
+    `${JSON.stringify({ version: 1, route: "private" })}\n`,
+  );
+}
+
+function appDataDirectory(): string {
+  if (process.platform === "darwin") return join(homedir(), "Library", "Application Support");
+  if (process.platform === "win32") return process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
+  return process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
+}
+
 async function main(): Promise<void> {
   const options = parseArguments(process.argv.slice(2));
   const lan = readLanAddress();
@@ -244,6 +263,10 @@ async function main(): Promise<void> {
   }
 
   if (options.withApp) {
+    // The host of a share has no relay: Signal of a share advertises no coturn, and the `openbot`
+    // route would look for one and leave every peer offline. The private route keeps the host on
+    // host candidates inside this network, which is what a share is.
+    ensurePrivateRoute();
     const app = spawn(join(projectRoot, "node_modules/.bin/electron-vite"), ["dev"], {
       cwd: projectRoot,
       env: {
@@ -251,6 +274,9 @@ async function main(): Promise<void> {
         ...process.env,
         OPENBOT_APP_VARIANT: "dev",
         OPENBOT_DEV_PROFILE: "app",
+        // The dev host signs a throwaway account in against this share's account service, so the
+        // host is published with no sign-in on screen.
+        OPENBOT_DEV_REMOTE_ROLE: "host",
         OPENBOT_AUTH_API_URL: `https://127.0.0.1:${DEFAULT_API_PORT}`,
         OPENBOT_REMOTE_SIGNAL_URL: `wss://127.0.0.1:${DEFAULT_SIGNAL_PORT}/v1/signal`,
         ...(rootCa ? { NODE_EXTRA_CA_CERTS: rootCa } : {}),

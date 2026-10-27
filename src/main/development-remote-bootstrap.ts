@@ -1,3 +1,4 @@
+import { createOpenBotLogger } from "@openbot/logging";
 import { Effect, Result } from "effect";
 /**
  * Everything `OPENBOT_DEV_REMOTE_ROLE` adds to startup: signing a throwaway account in against the
@@ -24,6 +25,8 @@ import { writeSetupState } from "./setup-store";
 import type { TeamStore } from "./team-store";
 
 export type DevelopmentRemoteRole = "host" | "client";
+
+const logger = createOpenBotLogger("development-remote");
 
 const developmentRemoteServerConnectionSchema: z.ZodType<DevelopmentRemoteServerConnection> = z.object({
   serverId: z.string().min(1),
@@ -89,6 +92,9 @@ export const startDevelopmentRemoteRole = Effect.fn("DevelopmentRemote.startRole
   if (role === "host") {
     yield* remoteCall(() => rm(developmentRemoteConnectionPath(), { force: true }));
     const status = yield* host.start();
+    // A LAN share needs the published host, and a silent fallback to a local-only one hides why the
+    // publish failed: log it, then keep the fallback so the app still opens.
+    if (status.phase !== "online") logger.warn(`The host did not publish: ${JSON.stringify(status)}`);
     if (status.phase !== "online") yield* host.startDevelopmentLocal();
     if (testClientEnabled) yield* writeDevelopmentRemoteConnection(yield* host.createDevelopmentConnection());
     return;
