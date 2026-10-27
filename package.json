@@ -114,6 +114,7 @@
     "dev:test-client": "bun scripts/dev-services.ts test-client",
     "dev:all": "bun scripts/dev-services.ts all",
     "lan:share": "bun scripts/lan-share.ts",
+    "lan:mobile-connect": "bun scripts/lan-mobile-connect.ts",
     "dev:slack": "bun scripts/dev-services.ts app --slack",
     "mobile": "bun run --cwd apps/mobile start",
     "mobile:go": "bun run --cwd apps/mobile start:go",

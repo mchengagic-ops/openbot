@@ -281,7 +281,13 @@ async function main(): Promise<void> {
         // be given the same one: the content security policy of the app is built from it, and a
         // loopback URL here would leave the Signal socket of the host blocked.
         OPENBOT_AUTH_API_URL: `https://127.0.0.1:${DEFAULT_API_PORT}`,
+        // A phone signs in with a Mobile Connect code, and the code names this address, so it must
+        // be the one the phone reaches and not loopback.
+        OPENBOT_MOBILE_AUTH_API_URL: apiOrigin,
         OPENBOT_REMOTE_SIGNAL_URL: `${signalOrigin}/v1/signal`,
+        // The share is inspected from the outside: a debugging port lets `scripts/lan-verify.ts`
+        // and a person read the window that this run opened.
+        OPENBOT_DEV_REMOTE_DEBUGGING_PORT: "9333",
         ...(rootCa ? { NODE_EXTRA_CA_CERTS: rootCa } : {}),
       },
       stdio: "inherit",

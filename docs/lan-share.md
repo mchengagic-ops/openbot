@@ -38,6 +38,25 @@ advertises another name, such as `openbot.lan`, when that name resolves on the n
 Without that CA the browser refuses the certificate, and the page has no secure context: WebRTC and
 the Web Lock it needs do not run.
 
+## The phone app
+
+The iPhone and Android apps connect to a share the same way they connect to any self-hosted service:
+with a Mobile Connect code, which names the account service of the share.
+
+1. Install the app: [App Store](https://apps.apple.com/us/app/openbot-run/id6807024266) on iOS,
+   [Google Play](https://play.google.com/store/apps/details?id=run.openbot.mobile) on Android.
+2. Install the root CA of `mkcert` on the phone and trust it. On iOS, also enable it in Settings ›
+   General › About › Certificate Trust Settings; the profile alone is not enough.
+3. In the desktop app of the share, open Settings › Mobile Connect and scan the QR code with the app,
+   or send the permanent link to the phone. The link names the address of the share, which is why the
+   launcher sets `OPENBOT_MOBILE_AUTH_API_URL`: without it the code would name loopback and the phone
+   could not use it.
+4. Allow the Local Network permission that iOS asks for on the first connection. Without it the app
+   cannot reach the share at all.
+
+The phone then connects to the host over the same private route as the browser: the two are on one
+network, and no request leaves it.
+
 ## What it runs
 
 | Part | Where |
