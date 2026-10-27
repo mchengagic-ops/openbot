@@ -67,3 +67,6 @@ keys
 
 # Persistent local development identity and migration recovery.
 .openbot/
+
+# A LAN share keeps its certificate and Signal secrets here.
+.lan-share/

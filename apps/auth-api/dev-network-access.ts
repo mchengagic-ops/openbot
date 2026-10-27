@@ -35,6 +35,10 @@ function publicListingPath(rest: string[], image: string): boolean {
 }
 
 export function developmentNetworkRequestAllowed(remoteAddress: string | undefined, requestUrl: string): boolean {
+  // A LAN share opens the whole development account service to this network: the browser client,
+  // its `/api/browser` routes and the assets of `/app`. The operator turns it on explicitly with
+  // `OPENBOT_LAN_SHARE=1`, and it is off otherwise, so a loopback-only run keeps the closed list.
+  if (process.env.OPENBOT_LAN_SHARE === "1") return true;
   if (remoteAddress === "127.0.0.1" || remoteAddress === "::1" || remoteAddress === "::ffff:127.0.0.1") return true;
   const pathname = new URL(requestUrl, "http://openbot.local").pathname;
   if (MOBILE_LAN_PATHS.has(pathname)) return true;

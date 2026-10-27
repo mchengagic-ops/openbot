@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import solidPlugin from "@solidjs/vite-plugin";
@@ -45,7 +46,8 @@ export default defineConfig(({ command }) => {
       port,
       strictPort: true,
       // `bun run dev:slack` tunnels Slack's install return to this server.
-      allowedHosts: [".openbot.localhost", ".trycloudflare.com"],
+      allowedHosts: [".openbot.localhost", ".trycloudflare.com", ...readLanHosts(process.env.OPENBOT_LAN_HOSTS)],
+      https: readLanHttps(process.env),
     },
     plugins: [
       developmentLanGuard(),
@@ -137,4 +139,29 @@ function readApiHost(value: string | undefined): "127.0.0.1" | "0.0.0.0" {
   if (value === undefined || value.trim() === "") return "127.0.0.1";
   if (value === "127.0.0.1" || value === "0.0.0.0") return value;
   throw new Error("OPENBOT_API_HOST must be 127.0.0.1 or 0.0.0.0.");
+}
+
+/**
+ * The host names other devices use to reach a LAN share. Vite refuses a request whose `Host` header
+ * it does not know, so a share names its own, such as `192.168.0.103` or `openbot.lan`.
+ */
+function readLanHosts(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((host) => host.trim())
+    .filter((host) => host !== "");
+}
+
+/**
+ * A LAN share is reached over HTTPS: the browser client needs a secure context for its WebRTC peer
+ * and its Web Lock, and the host refuses a plain HTTP origin that is not loopback. The paths come
+ * from `OPENBOT_LAN_TLS_CERT` and `OPENBOT_LAN_TLS_KEY`, made by `mkcert`.
+ */
+function readLanHttps(environment: NodeJS.ProcessEnv): { cert: Buffer; key: Buffer } | undefined {
+  const certPath = environment.OPENBOT_LAN_TLS_CERT?.trim();
+  const keyPath = environment.OPENBOT_LAN_TLS_KEY?.trim();
+  if (!certPath && !keyPath) return undefined;
+  if (!certPath || !keyPath)
+    throw new Error("OPENBOT_LAN_TLS_CERT and OPENBOT_LAN_TLS_KEY are both needed for a LAN share.");
+  return { cert: readFileSync(certPath), key: readFileSync(keyPath) };
 }

@@ -663,6 +663,16 @@ function isPrivateIpv4(address: string): boolean {
   );
 }
 
+/**
+ * A readiness probe for a service that may serve HTTPS: a LAN share gives the Auth API and Signal the
+ * certificate named by `certificatePath`, and a plain `http` probe would then never answer. The
+ * certificate is the local `mkcert` one, which this machine trusts.
+ */
+async function developmentProbe(path: string, certificatePath: string | undefined): Promise<Response> {
+  const protocol = certificatePath ? "https" : "http";
+  return await fetch(`${protocol}://${path}`, { signal: AbortSignal.timeout(1_000) });
+}
+
 async function waitForDevelopmentApi(portValue: string | undefined, child: ChildProcess): Promise<void> {
   const port = readPort(portValue);
   if (!port) throw new Error("The development API port is missing.");
@@ -670,9 +680,7 @@ async function waitForDevelopmentApi(portValue: string | undefined, child: Child
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error("The development Auth API stopped before it became ready.");
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/health/live`, {
-        signal: AbortSignal.timeout(1_000),
-      });
+      const response = await developmentProbe(`127.0.0.1:${port}/health/live`, process.env.OPENBOT_LAN_TLS_CERT);
       if (response.ok) return;
     } catch {
       // The API can reject connections while Vite and the Worker runtime start.
@@ -689,9 +697,7 @@ async function waitForDevelopmentRemote(portValue: string | undefined, child: Ch
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error("The development Signal service stopped before it became ready.");
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/health/ready`, {
-        signal: AbortSignal.timeout(1_000),
-      });
+      const response = await developmentProbe(`127.0.0.1:${port}/health/ready`, process.env.REMOTE_TLS_CERT_PATH);
       if (response.ok) return;
     } catch {
       // The Signal service can reject connections while Bun starts its watcher.
