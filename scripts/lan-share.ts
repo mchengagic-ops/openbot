@@ -277,8 +277,11 @@ async function main(): Promise<void> {
         // The dev host signs a throwaway account in against this share's account service, so the
         // host is published with no sign-in on screen.
         OPENBOT_DEV_REMOTE_ROLE: "host",
+        // The account service of the share hands every peer the shared signal URL, so the host must
+        // be given the same one: the content security policy of the app is built from it, and a
+        // loopback URL here would leave the Signal socket of the host blocked.
         OPENBOT_AUTH_API_URL: `https://127.0.0.1:${DEFAULT_API_PORT}`,
-        OPENBOT_REMOTE_SIGNAL_URL: `wss://127.0.0.1:${DEFAULT_SIGNAL_PORT}/v1/signal`,
+        OPENBOT_REMOTE_SIGNAL_URL: `${signalOrigin}/v1/signal`,
         ...(rootCa ? { NODE_EXTRA_CA_CERTS: rootCa } : {}),
       },
       stdio: "inherit",
