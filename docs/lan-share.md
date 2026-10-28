@@ -117,6 +117,36 @@ A Tailscale share serves plain HTTP on loopback only, so a device on the local n
 run Tailscale cannot use it. Start the share without `--tailscale` for that network, and with it for
 every other.
 
+## The desktop button
+
+`~/Desktop/OpenBot 共享.app` starts the share when it is stopped and stops it when it is running.
+The button itself does nothing but call `~/Scripts/openbot-share-toggle.sh`, so the same three
+commands work from a terminal:
+
+```sh
+~/Scripts/openbot-share-toggle.sh status   # running | stopped
+~/Scripts/openbot-share-toggle.sh on
+~/Scripts/openbot-share-toggle.sh off
+```
+
+The share runs detached, in its own session, so the button and the terminal can both go away. The
+result of each press goes to `~/Library/Logs/openbot-share-button.log`, and the share's own output
+to `~/Library/Logs/openbot-share.log`. The button never opens a dialog: this computer has no screen,
+and a dialog nobody can dismiss would hang the press forever.
+
+### Two copies, and why
+
+The runtime copy of the project is `~/openbot-lan`, on the internal disk. The working copy stays on
+the external volume. A process started by launchd or by an applet that reads the external volume
+waits for a TCC consent dialog, and on a computer with no screen that wait never ends: the share
+simply hangs. Running from the internal disk avoids the question entirely.
+
+After changing code in the working copy, sync it and restart the share:
+
+```sh
+~/Scripts/openbot-share-sync.sh     # rsync into ~/openbot-lan, deletes nothing
+```
+
 ## What it runs
 
 | Part | Where |
