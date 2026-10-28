@@ -31,6 +31,9 @@ if (-not (Test-Path $Exe)) {
 } else {
     $bat = @"
 @echo off
+rem 先退出已经在跑的 OpenBot：它有单实例锁，第二次启动只会切到旧窗口，环境变量被忽略。
+taskkill /IM OpenBot.exe /F >nul 2>&1
+timeout /t 1 /nobreak >nul
 set OPENBOT_AUTH_API_URL=$Api
 set OPENBOT_REMOTE_SIGNAL_URL=$Signal
 start "" "$Exe"

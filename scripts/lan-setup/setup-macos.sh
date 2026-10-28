@@ -33,8 +33,10 @@ if [ ! -d "$APP" ]; then
     echo "   装好后再跑一次这个脚本。"
 else
     SCRIPT_FILE="/tmp/openbot-share-client.applescript"
+    # 先退出已经在跑的 OpenBot：App 有单实例锁，第二次启动只会把旧窗口切到前面，
+    # 环境变量被忽略，于是它仍然连着官方账号服务。
     cat > "$SCRIPT_FILE" <<APPLESCRIPT
-do shell script "OPENBOT_AUTH_API_URL=$API OPENBOT_REMOTE_SIGNAL_URL=$SIGNAL nohup $APP/Contents/MacOS/OpenBot > /dev/null 2>&1 &"
+do shell script "pkill -x OpenBot > /dev/null 2>&1; sleep 1; OPENBOT_AUTH_API_URL=$API OPENBOT_REMOTE_SIGNAL_URL=$SIGNAL nohup $APP/Contents/MacOS/OpenBot > /dev/null 2>&1 &"
 APPLESCRIPT
     osacompile -o "$LAUNCHER" "$SCRIPT_FILE"
     echo "✅ 桌面已生成「OpenBot 共享」"
