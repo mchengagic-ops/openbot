@@ -375,7 +375,7 @@ async function main(): Promise<void> {
         OPENBOT_DEV_REMOTE_DEBUGGING_PORT: "9333",
         // The profile of the host (its agents, conversations and host identity) stays in the project,
         // with the certificate and the logs, instead of the Application Support folder.
-        ELECTRON_CLI_ARGS: JSON.stringify([`--user-data-dir=${join(projectRoot, ".openbot-data")}`]),
+        OPENBOT_USER_DATA_DIR: join(projectRoot, ".openbot-data"),
         ...(rootCa ? { NODE_EXTRA_CA_CERTS: rootCa } : {}),
       },
       stdio: "inherit",

@@ -197,8 +197,13 @@ if (developmentRemoteDebuggingPort) {
 // Linux #2374: name the Secret Service where Chromium would keep no sign-in.
 if (configureLinuxPasswordStore())
   logger.info(`No Chromium keyring for "${process.env.XDG_CURRENT_DESKTOP ?? ""}"; using gnome-libsecret.`);
+// electron-vite overwrites ELECTRON_CLI_ARGS with its own empty list in dev, so the switch is not a
+// way to move the profile of a development run: this variable is.
+const environmentUserDataDirectory = process.env.OPENBOT_USER_DATA_DIR?.trim() ?? "";
 if (commandLineUserDataDirectory) {
   app.setPath("userData", resolve(commandLineUserDataDirectory));
+} else if (environmentUserDataDirectory !== "") {
+  app.setPath("userData", resolve(environmentUserDataDirectory));
 } else if (!app.isPackaged) {
   app.setPath(
     "userData",
