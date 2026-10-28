@@ -87,6 +87,36 @@ set OPENBOT_REMOTE_SIGNAL_URL=wss://<this computer>:3101/v1/signal
 
 Sign in with the email the share's host uses, and the host is in its server list.
 
+## From another network
+
+`--tailscale` shares the same account service and Signal through Tailscale, so a phone on a mobile
+network or a laptop anywhere reaches the host of this computer. Tailscale Serve terminates TLS with
+the certificate that Tailscale issues for the name of this computer, which every device already
+trusts: nothing is installed on the devices, and no port is opened to the internet.
+
+```sh
+bun run lan:share --tailscale --with-app
+```
+
+The launcher publishes two ports through Serve and prints the name to use:
+
+```text
+account service  https://<this computer>.<tailnet>.ts.net:9443
+Signal           wss://<this computer>.<tailnet>.ts.net:9444/v1/signal
+```
+
+443 and 8443 already serve other things on this computer, which is why a share uses 9443 and 9444.
+The proxy stays in the background after the launcher ends; `tailscale serve --https=9443 off` and
+`--https=9444 off` remove it.
+
+Every device that connects must be signed in to the same tailnet. That is also what makes this the
+safe way to reach a share from outside: only the tailnet can open it, and no request reaches
+`api.openbot.run`.
+
+A Tailscale share serves plain HTTP on loopback only, so a device on the local network that does not
+run Tailscale cannot use it. Start the share without `--tailscale` for that network, and with it for
+every other.
+
 ## What it runs
 
 | Part | Where |

@@ -17,6 +17,7 @@
  *   bun run lan:share --with-app      # and the desktop host, in its own `OpenBot Dev` profile
  *   bun run lan:share --lan-host NAME # advertise another name, such as `openbot.lan`
  *   bun run lan:share --phone        # plain HTTP and WS for the phone app, with no certificate
+ *   bun run lan:share --tailscale    # reach the share from any network through Tailscale
  */
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -25,12 +26,18 @@ import { get as httpGet } from "node:http";
 import { get as httpsGet } from "node:https";
 import { homedir, networkInterfaces, hostname as readHostname } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 import { projectRoot } from "./dev-services";
 import { loadDevelopmentEnvironment } from "./development-environment";
+
+const tailscaleStatusSchema = z.object({ Self: z.object({ DNSName: z.string().min(1) }) });
 
 const DEFAULT_API_PORT = 3_100;
 const DEFAULT_SIGNAL_PORT = 3_101;
 const DEFAULT_SIGNAL_HEALTH_PORT = 3_102;
+/** The Tailscale Serve ports of a share. 443 and 8443 already serve other things on this computer. */
+const DEFAULT_TAILSCALE_API_PORT = 9_443;
+const DEFAULT_TAILSCALE_SIGNAL_PORT = 9_444;
 const LAN_DIRECTORY = join(projectRoot, ".lan-share");
 const CERTIFICATE_DIRECTORY = join(LAN_DIRECTORY, "certs");
 const SECRETS_FILE = join(LAN_DIRECTORY, "secrets.env");
@@ -40,6 +47,11 @@ interface LanShareOptions {
   lanHost: string | null;
   /** Plain HTTP and WS for the phone app, which needs no certificate for a local network. */
   phoneOnly: boolean;
+  /**
+   * Reach the share through Tailscale from any network. Tailscale Serve terminates TLS with a
+   * certificate that every device already trusts, so nothing is installed on the devices.
+   */
+  tailscale: boolean;
 }
 
 interface LanAddress {
@@ -50,11 +62,15 @@ interface LanAddress {
 }
 
 function parseArguments(argv: string[]): LanShareOptions {
-  const options: LanShareOptions = { withApp: false, lanHost: null, phoneOnly: false };
+  const options: LanShareOptions = { withApp: false, lanHost: null, phoneOnly: false, tailscale: false };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--with-app") {
       options.withApp = true;
+      continue;
+    }
+    if (argument === "--tailscale") {
+      options.tailscale = true;
       continue;
     }
     if (argument === "--phone") {
@@ -202,24 +218,69 @@ function appDataDirectory(): string {
   return process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
 }
 
+/** The name of this computer on the tailnet, which is the name its certificate is issued for. */
+function readTailscaleHost(): string {
+  const result = spawnSync(tailscaleBinary(), ["status", "--json"], { encoding: "utf8" });
+  if (result.status !== 0 || !result.stdout)
+    throw new Error("Tailscale is not running: a Tailscale share needs it on this computer.");
+  const parsed = tailscaleStatusSchema.safeParse(JSON.parse(result.stdout));
+  if (!parsed.success) throw new Error("Tailscale reported no name for this computer.");
+  return parsed.data.Self.DNSName.replace(/\.$/u, "");
+}
+
+/** The Tailscale CLI, which the app bundle of macOS keeps outside the PATH of a shell. */
+function tailscaleBinary() {
+  const bundled = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
+  return existsSync(bundled) ? bundled : "tailscale";
+}
+
+/**
+ * Points Tailscale Serve at the two listeners of the share. Serve terminates TLS with the
+ * certificate of this computer on the tailnet, which every device already trusts, and keeps the
+ * proxy up in the background after this process ends.
+ */
+function serveThroughTailscale(): void {
+  const targets: Array<[number, number]> = [
+    [DEFAULT_TAILSCALE_API_PORT, DEFAULT_API_PORT],
+    [DEFAULT_TAILSCALE_SIGNAL_PORT, DEFAULT_SIGNAL_PORT],
+  ];
+  for (const [servePort, localPort] of targets) {
+    const result = spawnSync(
+      tailscaleBinary(),
+      ["serve", "--bg", `--https=${servePort}`, `http://127.0.0.1:${localPort}`],
+      { encoding: "utf8" },
+    );
+    if (result.status !== 0)
+      throw new Error(`Tailscale Serve could not publish port ${servePort}: ${result.stderr || result.stdout}`);
+  }
+}
+
 async function main(): Promise<void> {
   const options = parseArguments(process.argv.slice(2));
   const lan = readLanAddress();
   const lanHost = options.lanHost ?? lan.address;
   const names = options.lanHost ? [lanHost, lan.address, lan.mdnsName] : [lan.address, lan.mdnsName];
-  const { certificate, privateKey } = options.phoneOnly
-    ? { certificate: "", privateKey: "" }
-    : ensureCertificate(names);
+  // `scheme` is how the account service and Signal serve on this computer. A Tailscale share keeps
+  // them on plain HTTP on loopback, because Tailscale Serve terminates TLS in front of them.
+  const plain = options.phoneOnly || options.tailscale;
+  const scheme = plain ? "http" : "https";
+  const socketScheme = plain ? "ws" : "wss";
+  const tailscaleHost = options.tailscale ? readTailscaleHost() : "";
+  // `apiOrigin` and `signalOrigin` are what the other devices use, which for a Tailscale share is
+  // the name of this computer on the tailnet and the ports Serve listens on.
+  const apiOrigin = options.tailscale
+    ? `https://${tailscaleHost}:${DEFAULT_TAILSCALE_API_PORT}`
+    : `${scheme}://${lanHost}:${DEFAULT_API_PORT}`;
+  const signalOrigin = options.tailscale
+    ? `wss://${tailscaleHost}:${DEFAULT_TAILSCALE_SIGNAL_PORT}`
+    : `${socketScheme}://${lanHost}:${DEFAULT_SIGNAL_PORT}`;
+  const { certificate, privateKey } = plain ? { certificate: "", privateKey: "" } : ensureCertificate(names);
   const secrets = ensureSecrets();
   const rootCa = readRootCaPath();
   const developmentEnvironment = await loadDevelopmentEnvironment(projectRoot);
   // A phone app reads a plain HTTP origin on a private address: its App Transport Security allows
   // local networking, and a certificate is the one step a phone cannot skip otherwise. A browser
   // cannot do the same, because WebRTC needs a secure context.
-  const scheme = options.phoneOnly ? "http" : "https";
-  const socketScheme = options.phoneOnly ? "ws" : "wss";
-  const apiOrigin = `${scheme}://${lanHost}:${DEFAULT_API_PORT}`;
-  const signalOrigin = `${socketScheme}://${lanHost}:${DEFAULT_SIGNAL_PORT}`;
 
   const children: ChildProcess[] = [];
   const stop = (): void => {
@@ -234,9 +295,11 @@ async function main(): Promise<void> {
       ...developmentEnvironment,
       ...process.env,
       OPENBOT_API_PORT: String(DEFAULT_API_PORT),
-      OPENBOT_API_HOST: "0.0.0.0",
+      OPENBOT_API_HOST: options.tailscale ? "127.0.0.1" : "0.0.0.0",
       OPENBOT_LAN_SHARE: "1",
-      OPENBOT_LAN_HOSTS: names.join(","),
+      // Vite refuses a request whose Host header it does not know, and Tailscale Serve forwards the
+      // tailnet name of this computer as that header.
+      OPENBOT_LAN_HOSTS: [...names, ...(options.tailscale ? [tailscaleHost] : [])].join(","),
       ...(options.phoneOnly ? {} : { OPENBOT_LAN_TLS_CERT: certificate, OPENBOT_LAN_TLS_KEY: privateKey }),
       REMOTE_SIGNAL_URL: `${signalOrigin}/v1/signal`,
     },
@@ -250,8 +313,8 @@ async function main(): Promise<void> {
       ...developmentEnvironment,
       ...process.env,
       ...secrets,
-      REMOTE_TLS_DISABLED: String(options.phoneOnly),
-      ...(options.phoneOnly ? {} : { REMOTE_TLS_CERT_PATH: certificate, REMOTE_TLS_KEY_PATH: privateKey }),
+      REMOTE_TLS_DISABLED: String(plain),
+      ...(plain ? {} : { REMOTE_TLS_CERT_PATH: certificate, REMOTE_TLS_KEY_PATH: privateKey }),
       REMOTE_SIGNAL_PORT: String(DEFAULT_SIGNAL_PORT),
       REMOTE_HEALTH_PORT: String(DEFAULT_SIGNAL_HEALTH_PORT),
       // Signal calls the account service and receives its revocation webhooks on this computer, so
@@ -275,6 +338,8 @@ async function main(): Promise<void> {
       `The share did not start: account service ${apiReady ? "ready" : "failed"}, Signal ${signalReady ? "ready" : "failed"}.`,
     );
   }
+
+  if (options.tailscale) serveThroughTailscale();
 
   if (options.withApp) {
     // The host of a share has no relay: Signal of a share advertises no coturn, and the `openbot`
