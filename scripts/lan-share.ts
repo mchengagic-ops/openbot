@@ -21,7 +21,7 @@
  */
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { get as httpsGet } from "node:https";
 import { homedir, networkInterfaces, hostname as readHostname } from "node:os";
@@ -274,6 +274,12 @@ async function main(): Promise<void> {
   const signalOrigin = options.tailscale
     ? `wss://${tailscaleHost}:${DEFAULT_TAILSCALE_SIGNAL_PORT}`
     : `${socketScheme}://${lanHost}:${DEFAULT_SIGNAL_PORT}`;
+  // 新设备从 8899 端口下载这两个脚本：装证书 + 生成带环境变量的桌面启动器。
+  const publicDirectory = join(LAN_DIRECTORY, "public");
+  mkdirSync(publicDirectory, { recursive: true });
+  for (const name of ["setup-macos.sh", "setup-windows.ps1"]) {
+    copyFileSync(join(projectRoot, "scripts", "lan-setup", name), join(publicDirectory, name));
+  }
   const { certificate, privateKey } = plain ? { certificate: "", privateKey: "" } : ensureCertificate(names);
   const secrets = ensureSecrets();
   const rootCa = readRootCaPath();

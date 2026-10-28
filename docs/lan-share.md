@@ -57,6 +57,35 @@ with a Mobile Connect code, which names the account service of the share.
 The phone then connects to the host over the same private route as the browser: the two are on one
 network, and no request leaves it.
 
+## The desktop app of another computer
+
+A browser needs nothing but the CA. The desktop app needs the same CA plus two environment
+variables, because it has to be told which account service and which Signal to use:
+
+```text
+OPENBOT_AUTH_API_URL=https://<this computer>:3100
+OPENBOT_REMOTE_SIGNAL_URL=wss://<this computer>:3101/v1/signal
+```
+
+`open -a OpenBot` cannot pass them: macOS does not give an environment to an app that Launch
+Services opens. The app has to be started from something that sets them, which is what the setup
+script below does. Sign in with the email that owns the host: the account service keeps hosts per
+account, so another email sees an empty server list.
+
+### One command per computer
+
+The share serves the two setup scripts on port 8899:
+
+| Computer | Command |
+| --- | --- |
+| macOS | `curl -fsS http://<this computer>:8899/setup-macos.sh \| bash` |
+| Windows | `irm http://<this computer>:8899/setup-windows.ps1 \| iex` |
+
+Each script trusts the CA of the share, writes a launcher to the desktop that sets the two
+variables, and opens the share to check that the certificate is in place. The macOS launcher is an
+applet that starts the binary of the app with the variables set; the Windows launcher is a `.bat`
+that does the same with `set`.
+
 ## Other computers
 
 A browser needs a secure context for WebRTC, so a computer joins a share over HTTPS and trusts its
