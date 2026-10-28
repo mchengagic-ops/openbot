@@ -15,8 +15,45 @@ $Api      = "https://$Share`:3100"
 $Signal   = "wss://$Share`:3101/v1/signal"
 $CaUrl    = "http://$Share`:8899/mkcert-rootCA.crt"
 $CaFile   = Join-Path $env:TEMP 'mkcert-rootCA.crt'
-$Exe      = Join-Path $env:LOCALAPPDATA 'Programs\OpenBot\OpenBot.exe'
 $Launcher = Join-Path ([Environment]::GetFolderPath('Desktop')) 'OpenBot 共享.bat'
+
+# OpenBot.exe 可能装在三个地方，取决于安装程序选了「仅我」还是「所有用户」；
+# 也可以自己用 OPENBOT_EXE 指过去。
+function Find-OpenBot {
+    if ($env:OPENBOT_EXE -and (Test-Path $env:OPENBOT_EXE)) { return $env:OPENBOT_EXE }
+
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\OpenBot\OpenBot.exe'),
+        (Join-Path $env:ProgramFiles 'OpenBot\OpenBot.exe')
+    )
+    if (${env:ProgramFiles(x86)}) {
+        $candidates += (Join-Path ${env:ProgramFiles(x86)} 'OpenBot\OpenBot.exe')
+    }
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+
+    $uninstallKeys = @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )
+    foreach ($key in $uninstallKeys) {
+        $entry = Get-ItemProperty $key -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like '*OpenBot*' } |
+            Select-Object -First 1
+        if (-not $entry) { continue }
+        if ($entry.DisplayIcon) {
+            $icon = $entry.DisplayIcon.Trim('"') -replace ',\d+$', ''
+            if (Test-Path $icon) { return $icon }
+        }
+        if ($entry.InstallLocation) {
+            $exe = Join-Path $entry.InstallLocation 'OpenBot.exe'
+            if (Test-Path $exe) { return $exe }
+        }
+    }
+    return $null
+}
 
 Write-Host '==> 1/3 安装根证书' -ForegroundColor Cyan
 Invoke-WebRequest -Uri $CaUrl -OutFile $CaFile
@@ -30,10 +67,11 @@ Copy-Item $CaFile $CaPem -Force
 Write-Host '✅ 证书已加入当前用户的受信任根（可能弹过一次安全警告，点“是”）' -ForegroundColor Green
 
 Write-Host '==> 2/3 生成桌面启动器' -ForegroundColor Cyan
-if (-not (Test-Path $Exe)) {
-    Write-Host "⚠️  没找到 $Exe" -ForegroundColor Yellow
-    Write-Host '   先装 OpenBot for Windows：https://openbot.run'
-    Write-Host '   装好后再跑一次这个脚本。'
+$Exe = Find-OpenBot
+if (-not $Exe) {
+    Write-Host '⚠️  没找到 OpenBot.exe，先装桌面版：' -ForegroundColor Yellow
+    Write-Host '   https://openbot.run   （或 GitHub Releases 的 OpenBot-*-x64.exe）'
+    Write-Host '   装好后再跑一次这个脚本；装到了非默认位置就设 OPENBOT_EXE 指过去。'
 } else {
     $bat = @"
 @echo off
@@ -46,7 +84,7 @@ set NODE_EXTRA_CA_CERTS=$CaPem
 start "" "$Exe"
 "@
     Set-Content -Path $Launcher -Value $bat -Encoding OEM
-    Write-Host "✅ 桌面已生成「OpenBot 共享.bat」" -ForegroundColor Green
+    Write-Host "✅ 桌面已生成「OpenBot 共享.bat」，指向 $Exe" -ForegroundColor Green
 }
 
 Write-Host '==> 3/3 验证' -ForegroundColor Cyan
@@ -65,4 +103,6 @@ Write-Host @"
   2. 登录邮箱填：openbot-dev-host@example.com
      验证码直接显示在登录页面上（不发送邮件）
   3. 连上后服务器列表里就是那台 Mac 上的 agent
+
+浏览器也能用：$Api/app
 "@
