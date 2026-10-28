@@ -70,3 +70,6 @@ keys
 
 # A LAN share keeps its certificate and Signal secrets here.
 .lan-share/
+
+# The profile of the development host of a share.
+.openbot-data/
