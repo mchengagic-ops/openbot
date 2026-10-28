@@ -41,7 +41,7 @@ else
     # 先退出已经在跑的 OpenBot：App 有单实例锁，第二次启动只会把旧窗口切到前面，
     # 环境变量被忽略，于是它仍然连着官方账号服务。
     cat > "$SCRIPT_FILE" <<APPLESCRIPT
-do shell script "pkill -x OpenBot > /dev/null 2>&1; sleep 1; OPENBOT_AUTH_API_URL=$API OPENBOT_REMOTE_SIGNAL_URL=$SIGNAL NODE_EXTRA_CA_CERTS=\"$HOME/Library/Application Support/OpenBot-lan/rootCA.pem\" nohup $APP/Contents/MacOS/OpenBot > /dev/null 2>&1 &"
+do shell script "pkill -x OpenBot > /dev/null 2>&1; sleep 1; OPENBOT_AUTH_API_URL=$API OPENBOT_REMOTE_SIGNAL_URL=$SIGNAL NODE_EXTRA_CA_CERTS=\"$HOME/Library/Application Support/OpenBot-lan/rootCA.pem\" nohup $APP/Contents/MacOS/OpenBot > \"$HOME/Library/Logs/openbot-share-app.log\" 2>&1 &"
 APPLESCRIPT
     osacompile -o "$LAUNCHER" "$SCRIPT_FILE"
     echo "✅ 桌面已生成「OpenBot 共享」"
