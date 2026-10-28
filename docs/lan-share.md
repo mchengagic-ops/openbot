@@ -57,6 +57,36 @@ with a Mobile Connect code, which names the account service of the share.
 The phone then connects to the host over the same private route as the browser: the two are on one
 network, and no request leaves it.
 
+## Other computers
+
+A browser needs a secure context for WebRTC, so a computer joins a share over HTTPS and trusts its
+CA. There is one share at a time: Signal is handed to every peer as one address, so a run is either
+the HTTPS one, which every browser and the phone app can use once they trust the CA, or the `--phone`
+one, which is plain HTTP for the phone app alone and that no browser can use.
+
+### Windows
+
+1. Copy `rootCA.pem` to the computer, and rename it `.crt` so Windows offers to install it.
+2. Install it for the current user in **Trusted Root Certification Authorities**: double-click the
+   file, then Install Certificate › Current User › Place all certificates in the following store ›
+   Trusted Root Certification Authorities. In an administrator prompt,
+   `certutil -addstore -f "ROOT" mkcert-rootCA.crt` does the same.
+3. Open `https://<this computer>:3100/app` and sign in with any email address; the page shows the
+   code instead of sending it.
+
+### The Windows desktop app
+
+The app connects to a share like the desktop app of the share does, through two environment
+variables. It refuses a plain HTTP origin that is not loopback, so this needs the HTTPS run.
+
+```bat
+set OPENBOT_AUTH_API_URL=https://<this computer>:3100
+set OPENBOT_REMOTE_SIGNAL_URL=wss://<this computer>:3101/v1/signal
+"C:\Users\<you>\AppData\Local\Programs\OpenBot\OpenBot.exe"
+```
+
+Sign in with the email the share's host uses, and the host is in its server list.
+
 ## What it runs
 
 | Part | Where |
