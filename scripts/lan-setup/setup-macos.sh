@@ -24,7 +24,12 @@ if ! curl -fsS -o "$CA_FILE" "$CA_URL"; then
     exit 1
 fi
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$CA_FILE"
-echo "✅ 证书已加入系统信任"
+# 桌面 App 的账号请求由 Electron 主进程发出，走 Node 的 TLS。Node 默认只信任自己内置的根证书，
+# 不看 macOS 钥匙串，所以再单独喂一份给 Node。
+CA_STORE="$HOME/Library/Application Support/OpenBot-lan"
+mkdir -p "$CA_STORE"
+cp "$CA_FILE" "$CA_STORE/rootCA.pem"
+echo "✅ 证书已加入系统信任，并放好一份给 Node：$CA_STORE/rootCA.pem"
 
 echo "==> 2/3 生成桌面启动器"
 if [ ! -d "$APP" ]; then
@@ -36,7 +41,7 @@ else
     # 先退出已经在跑的 OpenBot：App 有单实例锁，第二次启动只会把旧窗口切到前面，
     # 环境变量被忽略，于是它仍然连着官方账号服务。
     cat > "$SCRIPT_FILE" <<APPLESCRIPT
-do shell script "pkill -x OpenBot > /dev/null 2>&1; sleep 1; OPENBOT_AUTH_API_URL=$API OPENBOT_REMOTE_SIGNAL_URL=$SIGNAL nohup $APP/Contents/MacOS/OpenBot > /dev/null 2>&1 &"
+do shell script "pkill -x OpenBot > /dev/null 2>&1; sleep 1; OPENBOT_AUTH_API_URL=$API OPENBOT_REMOTE_SIGNAL_URL=$SIGNAL NODE_EXTRA_CA_CERTS=\"$HOME/Library/Application Support/OpenBot-lan/rootCA.pem\" nohup $APP/Contents/MacOS/OpenBot > /dev/null 2>&1 &"
 APPLESCRIPT
     osacompile -o "$LAUNCHER" "$SCRIPT_FILE"
     echo "✅ 桌面已生成「OpenBot 共享」"
@@ -44,9 +49,10 @@ fi
 
 echo "==> 3/3 验证"
 if curl -fsS -o /dev/null --max-time 8 "$API/app"; then
-    echo "✅ 共享可访问：$API/app"
+    echo "✅ 共享可访问（证书已生效）：$API/app"
 else
-    echo "❌ 连不上 $API，检查共享是否在运行"
+    echo "❌ curl 都连不上 $API"
+    echo "   证书没装好，或者这台电脑不在 192.168.0.0/24 网段，或者共享没开"
 fi
 
 cat <<TIPS

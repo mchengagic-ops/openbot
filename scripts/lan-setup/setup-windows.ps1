@@ -21,6 +21,12 @@ $Launcher = Join-Path ([Environment]::GetFolderPath('Desktop')) 'OpenBot 共享.
 Write-Host '==> 1/3 安装根证书' -ForegroundColor Cyan
 Invoke-WebRequest -Uri $CaUrl -OutFile $CaFile
 Import-Certificate -FilePath $CaFile -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+# 账号请求由 Electron 主进程发出，走 Node 的 TLS；Node 默认只信任自己内置的根证书，
+# 不看 Windows 证书存储，所以再单独喂一份给 Node。
+$CaStore = Join-Path $env:LOCALAPPDATA 'OpenBot-lan'
+New-Item -ItemType Directory -Force -Path $CaStore | Out-Null
+$CaPem = Join-Path $CaStore 'rootCA.crt'
+Copy-Item $CaFile $CaPem -Force
 Write-Host '✅ 证书已加入当前用户的受信任根（可能弹过一次安全警告，点“是”）' -ForegroundColor Green
 
 Write-Host '==> 2/3 生成桌面启动器' -ForegroundColor Cyan
@@ -36,6 +42,7 @@ taskkill /IM OpenBot.exe /F >nul 2>&1
 timeout /t 1 /nobreak >nul
 set OPENBOT_AUTH_API_URL=$Api
 set OPENBOT_REMOTE_SIGNAL_URL=$Signal
+set NODE_EXTRA_CA_CERTS=$CaPem
 start "" "$Exe"
 "@
     Set-Content -Path $Launcher -Value $bat -Encoding OEM
