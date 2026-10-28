@@ -40,7 +40,11 @@ export function readSelfHostedSignalOrigin(
   if (!signalUrl) return null;
   if (!authApiUrl) throw new Error("OPENBOT_REMOTE_SIGNAL_URL needs OPENBOT_AUTH_API_URL.");
   const url = new URL(signalUrl);
-  if (url.protocol !== "wss:" || url.username !== "" || url.password !== "") {
+  // `ws:` is allowed only on a private address, the same rule the mobile client applies when it
+  // decodes a ticket: a phone cannot be given a certificate for a share, and a plain socket inside
+  // one network is what it can use.
+  const plainAllowed = url.protocol === "ws:" && isMobileConnectDevelopmentHost(url.hostname);
+  if ((url.protocol !== "wss:" && !plainAllowed) || url.username !== "" || url.password !== "") {
     throw new Error("OPENBOT_REMOTE_SIGNAL_URL must be a wss: URL without credentials.");
   }
   return url.origin;

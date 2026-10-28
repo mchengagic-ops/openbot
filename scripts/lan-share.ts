@@ -16,11 +16,13 @@
  *   bun run lan:share                 # account service and Signal
  *   bun run lan:share --with-app      # and the desktop host, in its own `OpenBot Dev` profile
  *   bun run lan:share --lan-host NAME # advertise another name, such as `openbot.lan`
+ *   bun run lan:share --phone        # plain HTTP and WS for the phone app, with no certificate
  */
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { get } from "node:https";
+import { get as httpGet } from "node:http";
+import { get as httpsGet } from "node:https";
 import { homedir, networkInterfaces, hostname as readHostname } from "node:os";
 import { join } from "node:path";
 import { projectRoot } from "./dev-services";
@@ -36,6 +38,8 @@ const SECRETS_FILE = join(LAN_DIRECTORY, "secrets.env");
 interface LanShareOptions {
   withApp: boolean;
   lanHost: string | null;
+  /** Plain HTTP and WS for the phone app, which needs no certificate for a local network. */
+  phoneOnly: boolean;
 }
 
 interface LanAddress {
@@ -46,11 +50,15 @@ interface LanAddress {
 }
 
 function parseArguments(argv: string[]): LanShareOptions {
-  const options: LanShareOptions = { withApp: false, lanHost: null };
+  const options: LanShareOptions = { withApp: false, lanHost: null, phoneOnly: false };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--with-app") {
       options.withApp = true;
+      continue;
+    }
+    if (argument === "--phone") {
+      options.phoneOnly = true;
       continue;
     }
     if (argument === "--lan-host") {
@@ -158,7 +166,8 @@ async function probe(url: string, deadlineMs: number): Promise<boolean> {
   const deadline = Date.now() + deadlineMs;
   while (Date.now() < deadline) {
     const answered = await new Promise<boolean>((resolveProbe) => {
-      const request = get(url, { rejectUnauthorized: false, timeout: 1_000 }, (response) => {
+      const read = url.startsWith("https:") ? httpsGet : httpGet;
+      const request = read(url, { rejectUnauthorized: false, timeout: 1_000 }, (response) => {
         response.resume();
         resolveProbe(response.statusCode === 200);
       });
@@ -198,12 +207,19 @@ async function main(): Promise<void> {
   const lan = readLanAddress();
   const lanHost = options.lanHost ?? lan.address;
   const names = options.lanHost ? [lanHost, lan.address, lan.mdnsName] : [lan.address, lan.mdnsName];
-  const { certificate, privateKey } = ensureCertificate(names);
+  const { certificate, privateKey } = options.phoneOnly
+    ? { certificate: "", privateKey: "" }
+    : ensureCertificate(names);
   const secrets = ensureSecrets();
   const rootCa = readRootCaPath();
   const developmentEnvironment = await loadDevelopmentEnvironment(projectRoot);
-  const apiOrigin = `https://${lanHost}:${DEFAULT_API_PORT}`;
-  const signalOrigin = `wss://${lanHost}:${DEFAULT_SIGNAL_PORT}`;
+  // A phone app reads a plain HTTP origin on a private address: its App Transport Security allows
+  // local networking, and a certificate is the one step a phone cannot skip otherwise. A browser
+  // cannot do the same, because WebRTC needs a secure context.
+  const scheme = options.phoneOnly ? "http" : "https";
+  const socketScheme = options.phoneOnly ? "ws" : "wss";
+  const apiOrigin = `${scheme}://${lanHost}:${DEFAULT_API_PORT}`;
+  const signalOrigin = `${socketScheme}://${lanHost}:${DEFAULT_SIGNAL_PORT}`;
 
   const children: ChildProcess[] = [];
   const stop = (): void => {
@@ -221,8 +237,7 @@ async function main(): Promise<void> {
       OPENBOT_API_HOST: "0.0.0.0",
       OPENBOT_LAN_SHARE: "1",
       OPENBOT_LAN_HOSTS: names.join(","),
-      OPENBOT_LAN_TLS_CERT: certificate,
-      OPENBOT_LAN_TLS_KEY: privateKey,
+      ...(options.phoneOnly ? {} : { OPENBOT_LAN_TLS_CERT: certificate, OPENBOT_LAN_TLS_KEY: privateKey }),
       REMOTE_SIGNAL_URL: `${signalOrigin}/v1/signal`,
     },
     stdio: "inherit",
@@ -235,15 +250,14 @@ async function main(): Promise<void> {
       ...developmentEnvironment,
       ...process.env,
       ...secrets,
-      REMOTE_TLS_DISABLED: "false",
-      REMOTE_TLS_CERT_PATH: certificate,
-      REMOTE_TLS_KEY_PATH: privateKey,
+      REMOTE_TLS_DISABLED: String(options.phoneOnly),
+      ...(options.phoneOnly ? {} : { REMOTE_TLS_CERT_PATH: certificate, REMOTE_TLS_KEY_PATH: privateKey }),
       REMOTE_SIGNAL_PORT: String(DEFAULT_SIGNAL_PORT),
       REMOTE_HEALTH_PORT: String(DEFAULT_SIGNAL_HEALTH_PORT),
       // Signal calls the account service and receives its revocation webhooks on this computer, so
       // both stay on loopback and only the browser's two origins are shared.
-      REMOTE_CONTROL_PLANE_URL: `https://127.0.0.1:${DEFAULT_API_PORT}`,
-      REMOTE_AUTH_WEBHOOK_URL: `https://127.0.0.1:${DEFAULT_SIGNAL_PORT}/internal/auth-events`,
+      REMOTE_CONTROL_PLANE_URL: `${scheme}://127.0.0.1:${DEFAULT_API_PORT}`,
+      REMOTE_AUTH_WEBHOOK_URL: `${scheme}://127.0.0.1:${DEFAULT_SIGNAL_PORT}/internal/auth-events`,
       TURN_HOST: "127.0.0.1",
       TURN_PORT: "3478",
       TURN_TLS_PORT: "5349",
@@ -253,8 +267,8 @@ async function main(): Promise<void> {
   });
   children.push(signal);
 
-  const apiReady = await probe(`https://127.0.0.1:${DEFAULT_API_PORT}/health/live`, 90_000);
-  const signalReady = await probe(`https://127.0.0.1:${DEFAULT_SIGNAL_PORT}/health/live`, 90_000);
+  const apiReady = await probe(`${scheme}://127.0.0.1:${DEFAULT_API_PORT}/health/live`, 90_000);
+  const signalReady = await probe(`${scheme}://127.0.0.1:${DEFAULT_SIGNAL_PORT}/health/live`, 90_000);
   if (!apiReady || !signalReady) {
     stop();
     throw new Error(
@@ -280,7 +294,7 @@ async function main(): Promise<void> {
         // The account service of the share hands every peer the shared signal URL, so the host must
         // be given the same one: the content security policy of the app is built from it, and a
         // loopback URL here would leave the Signal socket of the host blocked.
-        OPENBOT_AUTH_API_URL: `https://127.0.0.1:${DEFAULT_API_PORT}`,
+        OPENBOT_AUTH_API_URL: `${scheme}://127.0.0.1:${DEFAULT_API_PORT}`,
         // A phone signs in with a Mobile Connect code, and the code names this address, so it must
         // be the one the phone reaches and not loopback.
         OPENBOT_MOBILE_AUTH_API_URL: apiOrigin,
@@ -295,25 +309,41 @@ async function main(): Promise<void> {
     children.push(app);
   }
 
-  process.stdout.write(
-    [
-      "",
-      "OpenBot is shared on this network:",
-      "",
-      `  ${apiOrigin}/app`,
-      "",
-      "Sign in with any email address: the account service of this share answers with the code",
-      "instead of sending it, so the code is shown on the page.",
-      "",
-      "Every device that opens the page must trust the root CA of `mkcert`:",
-      `  ${rootCa || "mkcert -CAROOT"}`,
-      "Copy that file to the device and install it as a trusted root, or run `mkcert -install` on it.",
-      "",
-      options.withApp ? "" : "The desktop host is not part of this run: pass --with-app, or start the app with",
-      options.withApp ? "" : `  OPENBOT_AUTH_API_URL=${apiOrigin} OPENBOT_REMOTE_SIGNAL_URL=${signalOrigin}/v1/signal`,
-      "",
-    ].join("\n"),
-  );
+  const lines = options.phoneOnly
+    ? [
+        "",
+        "OpenBot is shared with the phone app on this network:",
+        "",
+        `  account service  ${apiOrigin}`,
+        `  Signal           ${signalOrigin}/v1/signal`,
+        "",
+        "Open Settings > Mobile Connect in the desktop app and scan the code with the phone.",
+        "No certificate is needed, because this run is plain HTTP on a private address.",
+        "A browser cannot use this run: WebRTC needs a secure context. Start it again without",
+        "--phone for the browser client.",
+        "",
+      ]
+    : [
+        "",
+        "OpenBot is shared on this network:",
+        "",
+        `  ${apiOrigin}/app`,
+        "",
+        "Sign in with any email address: the account service of this share answers with the code",
+        "instead of sending it, so the code is shown on the page.",
+        "",
+        "Every device that opens the page must trust the root CA of `mkcert`:",
+        `  ${rootCa || "mkcert -CAROOT"}`,
+        "Copy that file to the device and install it as a trusted root, or run `mkcert -install` on it.",
+        "The phone app needs that trust as well; `--phone` runs a share that needs none.",
+        "",
+        options.withApp ? "" : "The desktop host is not part of this run: pass --with-app, or start the app with",
+        options.withApp
+          ? ""
+          : `  OPENBOT_AUTH_API_URL=${apiOrigin} OPENBOT_REMOTE_SIGNAL_URL=${signalOrigin}/v1/signal`,
+        "",
+      ];
+  process.stdout.write(lines.join("\n"));
 }
 
 if (import.meta.main) {
