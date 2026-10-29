@@ -38,10 +38,12 @@ if [ ! -d "$APP" ]; then
     echo "   装好后再跑一次这个脚本。"
 else
     SCRIPT_FILE="/tmp/openbot-share-client.applescript"
-    # 先退出已经在跑的 OpenBot：App 有单实例锁，第二次启动只会把旧窗口切到前面，
-    # 环境变量被忽略，于是它仍然连着官方账号服务。
+    # 两处都是必须的：
+    #   1. 先退出已经在跑的 OpenBot —— App 有单实例锁，第二次启动只会把旧窗口切到前面，
+    #      环境变量被忽略，于是它仍然连着官方账号服务。
+    #   2. 用 perl 的 setsid 而不是 nohup & —— 让它脱离启动器的会话，启动器退出后仍然活着。
     cat > "$SCRIPT_FILE" <<APPLESCRIPT
-do shell script "pkill -x OpenBot > /dev/null 2>&1; sleep 1; OPENBOT_AUTH_API_URL=$API OPENBOT_REMOTE_SIGNAL_URL=$SIGNAL NODE_EXTRA_CA_CERTS=\"$HOME/Library/Application Support/OpenBot-lan/rootCA.pem\" nohup $APP/Contents/MacOS/OpenBot > \"$HOME/Library/Logs/openbot-share-app.log\" 2>&1 &"
+do shell script "pkill -x OpenBot > /dev/null 2>&1; sleep 1; OPENBOT_AUTH_API_URL=$API OPENBOT_REMOTE_SIGNAL_URL=$SIGNAL NODE_EXTRA_CA_CERTS=\"$HOME/Library/Application Support/OpenBot-lan/rootCA.pem\" /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or exit 1' -- $APP/Contents/MacOS/OpenBot > \"$HOME/Library/Logs/openbot-share-app.log\" 2>&1 &"
 APPLESCRIPT
     osacompile -o "$LAUNCHER" "$SCRIPT_FILE"
     echo "✅ 桌面已生成「OpenBot 共享」"
