@@ -33,6 +33,13 @@ function Find-OpenBot {
         if (Test-Path $candidate) { return $candidate }
     }
 
+    # 免安装/自定义目录（很多人直接解压到桌面某个文件夹），在桌面和下载里找一层
+    foreach ($root in @([Environment]::GetFolderPath('Desktop'), (Join-Path $env:USERPROFILE 'Downloads'))) {
+        $found = Get-ChildItem $root -Recurse -Filter 'OpenBot.exe' -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($found) { return $found.FullName }
+    }
+
     $uninstallKeys = @(
         'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
         'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
